@@ -1,0 +1,58 @@
+name: Build Kaamly Android APKs
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Install Shared Package Dependencies
+        run: |
+          cd mobile/shared
+          flutter pub get
+
+      - name: Build Customer App APK
+        run: |
+          cd mobile/customer-app
+          flutter pub get
+          flutter build apk --release --split-per-abi=false
+
+      - name: Build Provider App APK
+        run: |
+          cd mobile/provider-app
+          flutter pub get
+          flutter build apk --release --split-per-abi=false
+
+      - name: Upload Customer APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaamly-customer-release-apk
+          path: mobile/customer-app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload Provider APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kaamly-provider-release-apk
+          path: mobile/provider-app/build/app/outputs/flutter-apk/app-release.apk

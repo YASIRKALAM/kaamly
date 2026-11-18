@@ -1,0 +1,280 @@
+# ==============================================================================
+# KAAMLY PLATFORM - DOCKER COMPOSE (PRODUCTION ENVIRONMENT)
+# ==============================================================================
+# Usage:
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. DATABASE: PostgreSQL 16 + PostGIS Spatial Engine (Internal Only)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: kaamly_postgres_prod
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:?DB_DATABASE required in .env.production}
+      POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME required in .env.production}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required in .env.production}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # In production, NO ports are published to host. Internal network only.
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/01-init-postgis.sh:/docker-entrypoint-initdb.d/01-init-postgis.sh:ro
+    networks:
+      - kaamly_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 4096M
+
+  # ----------------------------------------------------------------------------
+  # 2. CACHE & QUEUE BROKER: Redis 7 (Internal Only)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: kaamly_redis_prod
+    restart: always
+    command: >
+      sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD" --maxmemory 1024mb --maxmemory-policy allkeys-lru'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required in .env.production}
+    # No host port publication. Internal network only.
+    volumes:
+      - redisdata_prod:/data
+    networks:
+      - kaamly_internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # 3. PRIVATE OBJECT STORAGE: MinIO S3 (Internal Only)
+  # ----------------------------------------------------------------------------
+  minio:
+    image: minio/minio:RELEASE.2024-04-18T19-09-19Z
+    container_name: kaamly_minio_prod
+    restart: always
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required}
+    # Storage accessed strictly through internal network or pre-signed URLs via Nginx
+    volumes:
+      - miniodata_prod:/data
+    networks:
+      - kaamly_internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -f http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------------------------
+  # 4. MINIO INITIALIZER: Auto-Initializes Buckets & Application IAM
+  # ----------------------------------------------------------------------------
+  minio_init:
+    image: minio/mc:RELEASE.2024-04-18T16-45-29Z
+    container_name: kaamly_minio_init_prod
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD required}
+      MINIO_APP_USER: ${MINIO_APP_USER:?MINIO_APP_USER required}
+      MINIO_APP_PASSWORD: ${MINIO_APP_PASSWORD:?MINIO_APP_PASSWORD required}
+      MINIO_PRIVATE_BUCKET: ${MINIO_PRIVATE_BUCKET:-kaamly-private-docs}
+      MINIO_PUBLIC_BUCKET: ${MINIO_PUBLIC_BUCKET:-kaamly-public-assets}
+    volumes:
+      - ./infrastructure/docker/minio/init-minio.sh:/init-minio.sh:ro
+    entrypoint: ["/bin/sh", "/init-minio.sh"]
+    networks:
+      - kaamly_internal
+
+  # ----------------------------------------------------------------------------
+  # 5. CORE API BACKEND: Laravel 13 (PHP 8.3-FPM Production)
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ./infrastructure/docker/php
+      dockerfile: Dockerfile
+    container_name: kaamly_backend_prod
+    restart: always
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      APP_NAME: "Kaamly"
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_KEY: ${APP_KEY:?APP_KEY required}
+      APP_URL: ${APP_URL:?APP_URL required e.g. https://api.kaamly.com}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+      REDIS_PORT: 6379
+      CACHE_STORE: redis
+      QUEUE_CONNECTION: redis
+      SESSION_DRIVER: redis
+      FILESYSTEM_DISK: s3
+      AWS_ACCESS_KEY_ID: ${MINIO_APP_USER:?MINIO_APP_USER required}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_APP_PASSWORD:?MINIO_APP_PASSWORD required}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_BUCKET: ${MINIO_PRIVATE_BUCKET:-kaamly-private-docs}
+      AWS_PUBLIC_BUCKET: ${MINIO_PUBLIC_BUCKET:-kaamly-public-assets}
+      AWS_ENDPOINT: http://minio:9000
+      AWS_USE_PATH_STYLE_ENDPOINT: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio_init:
+        condition: service_completed_successfully
+    networks:
+      - kaamly_internal
+
+  # ----------------------------------------------------------------------------
+  # 6. REAL-TIME ENGINE: Laravel Reverb WebSockets
+  # ----------------------------------------------------------------------------
+  reverb:
+    build:
+      context: ./infrastructure/docker/php
+      dockerfile: Dockerfile
+    container_name: kaamly_reverb_prod
+    restart: always
+    working_dir: /var/www/html
+    command: php artisan reverb:start --host=0.0.0.0 --port=8080
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      APP_NAME: "Kaamly"
+      APP_ENV: production
+      APP_KEY: ${APP_KEY:?APP_KEY required}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+      REVERB_APP_ID: ${REVERB_APP_ID:?REVERB_APP_ID required}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:?REVERB_APP_KEY required}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:?REVERB_APP_SECRET required}
+      REVERB_HOST: "0.0.0.0"
+      REVERB_PORT: 8080
+      REVERB_SCHEME: "https"
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - kaamly_internal
+
+  # ----------------------------------------------------------------------------
+  # 7. ASYNC WORKERS: Laravel Queue Worker (Production Managed)
+  # ----------------------------------------------------------------------------
+  queue_worker:
+    build:
+      context: ./infrastructure/docker/php
+      dockerfile: Dockerfile
+    container_name: kaamly_queue_worker_prod
+    restart: always
+    working_dir: /var/www/html
+    command: >
+      php artisan queue:work redis 
+      --sleep=3 
+      --tries=3 
+      --timeout=90 
+      --max-time=3600 
+      --max-jobs=1000 
+      --memory=512 
+      --rest=1
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      APP_NAME: "Kaamly"
+      APP_ENV: production
+      APP_KEY: ${APP_KEY:?APP_KEY required}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:?DB_DATABASE required}
+      DB_USERNAME: ${DB_USERNAME:?DB_USERNAME required}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD required}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD required}
+      QUEUE_CONNECTION: redis
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - kaamly_internal
+
+  # ----------------------------------------------------------------------------
+  # 8. ADMIN WEB PORTAL: Next.js 16 Production Container
+  # ----------------------------------------------------------------------------
+  admin_portal:
+    build:
+      context: ./admin-portal
+      dockerfile: ../infrastructure/docker/node/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?NEXT_PUBLIC_API_URL required}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:?NEXT_PUBLIC_WS_URL required}
+    container_name: kaamly_admin_portal_prod
+    restart: always
+    environment:
+      NODE_ENV: production
+      INTERNAL_API_URL: http://nginx/api/v1
+    networks:
+      - kaamly_internal
+
+  # ----------------------------------------------------------------------------
+  # 9. EDGE GATEWAY: Nginx Reverse Proxy with TLS/SSL
+  # ----------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: kaamly_nginx_prod
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./backend:/var/www/html:ro
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/conf.d/kaamly-prod.conf:/etc/nginx/conf.d/default.conf:ro
+      # TLS Certificate mounts from host
+      - ${SSL_CERT_PATH:-./infrastructure/certs/kaamly.crt}:/etc/ssl/certs/kaamly.crt:ro
+      - ${SSL_KEY_PATH:-./infrastructure/certs/kaamly.key}:/etc/ssl/private/kaamly.key:ro
+    depends_on:
+      - backend
+      - reverb
+      - admin_portal
+    networks:
+      - kaamly_internal
+
+networks:
+  kaamly_internal:
+    driver: bridge
+
+volumes:
+  pgdata_prod:
+    driver: local
+  redisdata_prod:
+    driver: local
+  miniodata_prod:
+    driver: local

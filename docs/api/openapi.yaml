@@ -1,0 +1,353 @@
+openapi: 3.1.0
+info:
+  title: Kaamly Marketplace Centralized API
+  description: >
+    Production REST API for Kaamly on-demand home and technical services marketplace platform.
+    Powers Flutter Customer & Provider Mobile Apps and Next.js 16 Web Admin Portal.
+  version: 1.0.0
+  contact:
+    name: Kaamly Engineering Team
+    email: api-support@kaamly.com
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local Docker Development Gateway
+  - url: https://api.kaamly.com/api/v1
+    description: Production API Gateway
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: System health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+  /auth/register:
+    post:
+      summary: Register customer or provider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name, phone_number, password, user_type]
+              properties:
+                first_name: { type: string }
+                last_name: { type: string }
+                phone_number: { type: string, example: "+923001234567" }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                user_type: { type: string, enum: [customer, provider] }
+      responses:
+        '201':
+          description: Registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/login:
+    post:
+      summary: Login via phone/password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone_number, password]
+              properties:
+                phone_number: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: Authenticated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /auth/me:
+    get:
+      summary: Current authenticated user profile and roles
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+  /discovery/providers:
+    post:
+      summary: 6-Gate PostGIS Provider Discovery Search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [latitude, longitude, service_id]
+              properties:
+                latitude: { type: number, format: float, example: 31.5204 }
+                longitude: { type: number, format: float, example: 74.3587 }
+                service_id: { type: string, format: uuid }
+                radius_km: { type: number, default: 15.0 }
+                scheduled_start_at: { type: string, format: date-time }
+      responses:
+        '200':
+          description: List of nearest eligible candidate technicians
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardResponse'
+
+  /customer/bookings:
+    get:
+      summary: List customer bookings
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Paginated bookings list
+    post:
+      summary: Create a new booking
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service_id, address_id, scheduled_start_at, payment_mode]
+              properties:
+                service_id: { type: string, format: uuid }
+                address_id: { type: string, format: uuid }
+                provider_profile_id: { type: string, format: uuid }
+                scheduled_start_at: { type: string, format: date-time }
+                payment_mode: { type: string, enum: [online_escrow, cash_on_delivery] }
+      responses:
+        '201':
+          description: Booking created
+
+  /customer/bookings/{id}/quotations/{quoteId}/accept:
+    post:
+      summary: Customer approves quotation and locks agreed price snapshot
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: quoteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Quotation accepted and booking confirmed
+
+  /customer/bookings/{id}/quotations/{quoteId}/reject:
+    post:
+      summary: Customer rejects inspection quotation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: quoteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Quotation rejected
+
+  /customer/bookings/{id}/reschedule/request:
+    post:
+      summary: Request booking rescheduling
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_start_at, new_end_at, reason]
+              properties:
+                new_start_at: { type: string, format: date-time }
+                new_end_at: { type: string, format: date-time }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Reschedule requested
+
+  /customer/bookings/{id}/reschedule/confirm:
+    post:
+      summary: Confirm mutual booking rescheduling
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Rescheduled appointment confirmed
+
+  /customer/bookings/{id}/no-show:
+    post:
+      summary: Report customer or provider no-show
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [responsible_party, reason]
+              properties:
+                responsible_party: { type: string, enum: [customer, provider] }
+                reason: { type: string }
+                evidence: { type: array, items: { type: string } }
+                wait_minutes: { type: integer }
+                calls_logged: { type: integer }
+      responses:
+        '200':
+          description: No-show recorded and settlement processed
+
+  /provider/jobs/{id}/accept:
+    post:
+      summary: Provider accepts dispatched job (Enforces COD Debt Limit < PKR 2,000)
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Job accepted
+        '403':
+          description: Blocked due to outstanding COD debt >= PKR 2,000
+
+  /provider/jobs/{id}/quotation:
+    post:
+      summary: Provider submits inspection quotation with line items
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [line_items]
+              properties:
+                inspection_notes: { type: string }
+                line_items:
+                  type: array
+                  items:
+                    type: object
+                    required: [description, item_type, unit_price, quantity]
+                    properties:
+                      description: { type: string }
+                      item_type: { type: string, enum: [labor, material, equipment] }
+                      unit_price: { type: number }
+                      quantity: { type: number }
+      responses:
+        '201':
+          description: Quotation submitted successfully
+
+  /provider/wallet:
+    get:
+      summary: Provider wallet summary showing receivable debt, payables and withdrawable balance
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Provider wallet balances
+
+  /admin/ledger/reversal:
+    post:
+      summary: Reverse transaction (Maker-checker enforced)
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transaction_id, reason]
+              properties:
+                transaction_id: { type: string, format: uuid }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Transaction reversed
+        '403':
+          description: Maker-checker violation (cannot reverse own transaction)
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Sanctum
+
+  schemas:
+    StandardResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        data: { type: object }
+        errors: { type: object }
+
+    AuthResponse:
+      type: object
+      required: [success, message, token, user]
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        token: { type: string }
+        user:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            first_name: { type: string }
+            last_name: { type: string }
+            phone_number: { type: string }
+            roles: { type: array, items: { type: string } }
