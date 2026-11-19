@@ -80,7 +80,7 @@ class _ProviderLoginScreenState extends State<ProviderLoginScreen> {
                   decoration: BoxDecoration(
                     color: Colors.red.shade50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.Border.all(color: Colors.red.shade200),
+                    border: Border.all(color: Colors.red.shade200),
                   ),
                   child: Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
                 ),
