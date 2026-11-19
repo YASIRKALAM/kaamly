@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:kaamly_shared/kaamly_shared.dart';
 import 'submit_quotation_screen.dart';
-import '../wallet/screens/provider_wallet_screen.dart';
+import '../../wallet/screens/provider_wallet_screen.dart';
 
 class ProviderJobsScreen extends StatefulWidget {
   final ApiClient apiClient;
