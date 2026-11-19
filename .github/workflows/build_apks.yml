@@ -37,7 +37,7 @@ jobs:
         run: |
           cd mobile/customer-app
           rm -rf android
-          flutter create . --platforms=android --org com.kaamly
+          flutter create . --project-name kaamly_customer --platforms=android --org com.kaamly
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
           flutter pub get
           flutter build apk --release
@@ -46,7 +46,7 @@ jobs:
         run: |
           cd mobile/provider-app
           rm -rf android
-          flutter create . --platforms=android --org com.kaamly
+          flutter create . --project-name kaamly_provider --platforms=android --org com.kaamly
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.CAMERA" />' android/app/src/main/AndroidManifest.xml
           flutter pub get
           flutter build apk --release
