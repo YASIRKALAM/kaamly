@@ -7,6 +7,7 @@ import 'features/jobs/screens/provider_jobs_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final apiClient = ApiClient();
+  await apiClient.loadSavedBaseUrl();
   final token = await apiClient.getToken();
 
   runApp(KaamlyProviderApp(

@@ -21,3 +21,6 @@ export 'src/websocket/reverb_client.dart';
 
 // Theme
 export 'src/theme/app_theme.dart';
+
+// Widgets
+export 'src/widgets/server_config_dialog.dart';

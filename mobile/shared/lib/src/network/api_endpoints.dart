@@ -1,5 +1,9 @@
 class ApiEndpoints {
-  static const String baseUrl = 'http://10.0.2.2:8080/api/v1'; // Android emulator localhost alias
+  static String baseUrl = 'http://192.168.18.9:8080/api/v1'; // Configurable dynamically via App UI
+
+  static void setBaseUrl(String url) {
+    baseUrl = url;
+  }
 
   // Auth
   static const String register = '/auth/register';

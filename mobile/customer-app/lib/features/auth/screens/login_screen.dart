@@ -53,6 +53,22 @@ class _CustomerLoginScreenState extends State<CustomerLoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: AppColors.primary),
+            tooltip: 'Server Settings',
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => ServerConfigDialog(apiClient: widget.apiClient),
+              );
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24.0),

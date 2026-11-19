@@ -6,6 +6,7 @@ import '../models/api_response.dart';
 class ApiClient {
   late final Dio _dio;
   final FlutterSecureStorage _storage;
+  static const String _baseUrlStorageKey = 'custom_base_url';
 
   ApiClient({String? baseUrl, FlutterSecureStorage? storage})
       : _storage = storage ?? const FlutterSecureStorage() {
@@ -35,6 +36,44 @@ class ApiClient {
         },
       ),
     );
+  }
+
+  String get currentBaseUrl => _dio.options.baseUrl;
+
+  Future<void> loadSavedBaseUrl() async {
+    try {
+      final saved = await _storage.read(key: _baseUrlStorageKey);
+      if (saved != null && saved.trim().isNotEmpty) {
+        _dio.options.baseUrl = saved.trim();
+        ApiEndpoints.setBaseUrl(saved.trim());
+      }
+    } catch (_) {}
+  }
+
+  Future<void> updateBaseUrl(String newUrl) async {
+    final trimmed = newUrl.trim();
+    if (trimmed.isNotEmpty) {
+      _dio.options.baseUrl = trimmed;
+      ApiEndpoints.setBaseUrl(trimmed);
+      try {
+        await _storage.write(key: _baseUrlStorageKey, value: trimmed);
+      } catch (_) {}
+    }
+  }
+
+  Future<bool> testConnection() async {
+    try {
+      final res = await _dio.get(
+        ApiEndpoints.categories,
+        options: Options(
+          sendTimeout: const Duration(seconds: 4),
+          receiveTimeout: const Duration(seconds: 4),
+        ),
+      );
+      return res.statusCode != null && res.statusCode! >= 200 && res.statusCode! < 500;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> saveToken(String token) async {
