@@ -37,13 +37,13 @@ jobs:
         run: |
           cd mobile/customer-app
           flutter pub get
-          flutter build apk --release --split-per-abi=false
+          flutter build apk --release
 
       - name: Build Provider App APK
         run: |
           cd mobile/provider-app
           flutter pub get
-          flutter build apk --release --split-per-abi=false
+          flutter build apk --release
 
       - name: Upload Customer APK
         uses: actions/upload-artifact@v4
